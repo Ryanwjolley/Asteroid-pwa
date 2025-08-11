@@ -1,0 +1,518 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"/>
+<title>Asteroids+ PWA</title>
+
+<!-- iOS full-screen + status bar -->
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black">
+<meta name="apple-mobile-web-app-title" content="Asteroids+">
+
+<!-- Fallback icons (iOS will screenshot if not supplied). PNG strongly preferred; SVG works for mask-icon -->
+<link rel="icon" href="data:image/svg+xml;utf8,<?xml version='1.0' encoding='UTF-8'?><svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 128 128'><rect width='128' height='128' fill='%230b0f13'/><g transform='translate(64 64)'><polygon points='16,0 -13,11 -8,0 -13,-11' fill='none' stroke='%23eaf6ff' stroke-width='4'/></g></svg>">
+
+<style>
+  :root{--bg:#0b0f13;--fg:#eaf6ff;--muted:#9db9cf;--accent:#59f}
+  *{box-sizing:border-box}
+  html,body{height:100%;margin:0;background:radial-gradient(1200px 700px at 50% -10%, #121821, var(--bg));color:var(--fg);font-family:system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,Helvetica,Arial,sans-serif}
+  #wrap{position:relative;display:grid;place-items:center;height:100%;gap:10px;padding:12px}
+  canvas{width:min(96vw,960px);height:min(70vh,720px);max-width:100%;aspect-ratio:4/3;background:linear-gradient(180deg, rgba(255,255,255,.03), transparent 20%)}
+  .hud{position:absolute;top:10px;left:50%;transform:translateX(-50%);display:flex;gap:10px;align-items:center;font-weight:600;text-shadow:0 1px 0 #0008;flex-wrap:wrap;justify-content:center}
+  .pill{padding:6px 10px;border:1px solid #2a3a49;border-radius:999px;background:#0f151cbb;backdrop-filter:blur(4px)}
+  .buff{border-color:#3a5cc8;color:#cfe0ff}
+  .footer{opacity:.8;font-size:.9rem}
+  .btn{display:inline-block;padding:8px 14px;border-radius:10px;border:1px solid #2a3a49;background:#121a24;color:var(--fg);text-decoration:none}
+  .btn:hover{border-color:#3a4e63}
+  #overlay{position:absolute;inset:0;display:grid;place-items:center;pointer-events:none}
+  .centerCard{pointer-events:auto;text-align:center;padding:18px 22px;border:1px solid #2a3a49;border-radius:14px;background:#0f151cdd;max-width:min(90vw,560px)}
+  kbd{padding:2px 6px;border:1px solid #3a4e63;border-bottom-width:3px;border-radius:6px;background:#101722;box-shadow:inset 0 1px 0 #fff1}
+  .row{display:flex;gap:12px;justify-content:center;flex-wrap:wrap;margin-top:8px}
+
+  /* Mobile controls */
+  #touch{position:absolute;inset:auto 0 8px 0;display:flex;justify-content:center;gap:8px;pointer-events:none}
+  .pad{display:flex;gap:8px}
+  .ctl{pointer-events:auto;min-width:64px;min-height:64px;border:1px solid #2a3a49;border-radius:14px;background:#101722cc;backdrop-filter:blur(6px);touch-action:none}
+  .ctl:active{transform:translateY(1px)}
+  .wide{min-width:110px}
+  .label{font-size:.8rem;opacity:.85}
+  @media (max-width:820px){canvas{height:62vh}}
+</style>
+</head>
+<body>
+  <div id="wrap">
+    <canvas id="game" width="960" height="720"></canvas>
+    <div class="footer">Asteroids+ — iPhone PWA. <a class="btn" href="#" id="startBtn">Start</a></div>
+    <div id="touch" aria-hidden="false">
+      <div class="pad">
+        <button class="ctl" id="left" aria-label="turn left">⟲</button>
+        <button class="ctl" id="right" aria-label="turn right">⟳</button>
+      </div>
+      <div class="pad">
+        <button class="ctl wide" id="thrust" aria-label="thrust">↑ Thrust</button>
+        <button class="ctl wide" id="fire" aria-label="fire">● Fire</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="hud" id="hud">
+    <div class="pill">Score: <span id="score">0</span></div>
+    <div class="pill">Lives: <span id="lives">3</span></div>
+    <div class="pill">Level: <span id="level">1</span></div>
+    <div class="pill buff" id="buffTxt" hidden></div>
+  </div>
+
+  <div id="overlay" hidden>
+    <div class="centerCard" id="overlayCard">
+      <h2 style="margin:0 0 8px">Asteroids+</h2>
+      <p style="margin:0 0 12px;opacity:.9">Blast asteroids, collect power-ups, survive.</p>
+      <div class="row" style="margin-bottom:6px">
+        <span><kbd>←</kbd>/<kbd>→</kbd> Rotate</span>
+        <span><kbd>↑</kbd> Thrust</span>
+        <span><kbd>Space</kbd> Fire</span>
+        <span><kbd>Enter</kbd> Start</span>
+      </div>
+      <p class="label" style="margin:6px 0 12px">Power-ups: <b>Shield</b> (invincible), <b>Rapid</b> (faster fire), <b>Life</b> (+1).</p>
+      <a class="btn" href="#" id="overlayStart">Start Game</a>
+    </div>
+  </div>
+
+<script>
+/* ===== PWA: inline manifest + service worker (HTTPS or localhost required) ===== */
+(function pwa(){
+  const iconSVG = "<?xml version='1.0' encoding='UTF-8'?><svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'><rect width='512' height='512' fill='%230b0f13'/><g transform='translate(256 256)'><polygon points='64,0 -52,44 -32,0 -52,-44' fill='none' stroke='%23eaf6ff' stroke-width='18'/></g></svg>";
+  const iconURL = "data:image/svg+xml;utf8," + encodeURIComponent(iconSVG);
+
+  // Create a manifest on the fly so this stays single-file
+  const manifest = {
+    name: "Asteroids+",
+    short_name: "Asteroids+",
+    start_url: ".",
+    display: "standalone",
+    background_color: "#0b0f13",
+    theme_color: "#0b0f13",
+    icons: [
+      { src: iconURL, sizes: "512x512", type: "image/svg+xml", purpose: "any" }
+    ]
+  };
+  const manBlob = new Blob([JSON.stringify(manifest)], {type:"application/json"});
+  const manURL = URL.createObjectURL(manBlob);
+  const link = document.createElement('link');
+  link.rel = 'manifest'; link.href = manURL; document.head.appendChild(link);
+
+  // Inline service worker via Blob (cache this file for offline)
+  if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost')) {
+    const swCode = `
+      const CACHE = 'asteroids-v1';
+      self.addEventListener('install', e=>{
+        e.waitUntil((async ()=>{
+          const c = await caches.open(CACHE);
+          // cache the root and this single file
+          await c.addAll(['./', self.registration.scope]);
+          self.skipWaiting();
+        })());
+      });
+      self.addEventListener('activate', e=>{
+        e.waitUntil((async ()=>{
+          const keys = await caches.keys();
+          await Promise.all(keys.filter(k=>k!==CACHE).map(k=>caches.delete(k)));
+          self.clients.claim();
+        })());
+      });
+      self.addEventListener('fetch', e=>{
+        const req = e.request;
+        if (req.method !== 'GET') return;
+        e.respondWith((async ()=>{
+          const cached = await caches.match(req);
+          if (cached) return cached;
+          try {
+            const net = await fetch(req);
+            const c = await caches.open(CACHE);
+            c.put(req, net.clone());
+            return net;
+          } catch {
+            return cached || Response.error();
+          }
+        })());
+      });
+    `;
+    const swURL = URL.createObjectURL(new Blob([swCode], {type:'text/javascript'}));
+    navigator.serviceWorker.register(swURL).catch(()=>{});
+  }
+})();
+</script>
+
+<script>
+/* ===== Game (Asteroids+ with touch, power-ups, audio) ===== */
+(() => {
+  const canvas = document.getElementById('game');
+  const ctx = canvas.getContext('2d');
+
+  // ===== Audio (WebAudio mini-synth) =====
+  let AC, master;
+  function initAudio(){
+    if (!AC){
+      AC = new (window.AudioContext||window.webkitAudioContext)();
+      master = AC.createGain();
+      master.gain.value = 0.12;
+      master.connect(AC.destination);
+    }
+  }
+  function beep(type='sine', freq=440, dur=0.08, vol=0.6){
+    if (!AC) return;
+    const t = AC.currentTime;
+    const o = AC.createOscillator();
+    const g = AC.createGain();
+    o.type = type; o.frequency.setValueAtTime(freq, t);
+    g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(vol, t+0.004);
+    g.gain.exponentialRampToValueAtTime(0.0001, t+dur);
+    o.connect(g); g.connect(master); o.start(t); o.stop(t+dur+0.02);
+  }
+  const sfx = {
+    shoot(){beep('square', 880, 0.06, 0.4)},
+    explode(){beep('sawtooth', 120, 0.25, 0.8); setTimeout(()=>beep('triangle', 80, 0.2, 0.5), 30)},
+    thrustOn(){beep('sawtooth', 220, 0.12, 0.22)},
+    pickup(){beep('triangle', 740, 0.12, 0.7)}
+  };
+
+  // ===== Utilities =====
+  const TAU = Math.PI*2;
+  const rand = (a,b)=>Math.random()*(b-a)+a;
+  const clamp = (v,min,max)=>Math.max(min,Math.min(max,v));
+  const wrap = (v, max)=> (v<0? v+max : (v>max? v-max : v));
+  const dist2=(x1,y1,x2,y2)=>{const dx=x2-x1,dy=y2-y1;return dx*dx+dy*dy;}
+  const chance = (p)=>Math.random()<p;
+
+  class Vec{
+    constructor(x=0,y=0){this.x=x;this.y=y;}
+    add(v){this.x+=v.x;this.y+=v.y;return this;}
+    scale(s){this.x*=s;this.y*=s;return this;}
+    copy(){return new Vec(this.x,this.y);}
+    static fromAngle(a,mag=1){return new Vec(Math.cos(a)*mag, Math.sin(a)*mag);}
+  }
+
+  // ===== Game State =====
+  const state = {
+    running:false, paused:false,
+    score:0, lives:3, level:1,
+    bullets:[], asteroids:[], particles:[], powerups:[],
+    keys:{}, cooldown:0, invuln:0, rapid:0,
+  };
+  const params = {
+    shipRadius:14,
+    shipThrust:0.12,
+    shipFriction:0.995,
+    maxBullets:6,
+    bulletSpeed:7.2,
+    bulletLife:65,
+    asteroidBase:5,
+    asteroidMinSpeed:0.5,
+    asteroidMaxSpeed:1.8,
+    particleCount:16,
+    hyperSafeTime:90,
+    powerupLife:600, // ~10s
+    powerupDropChance:0.16,
+    rapidFire:6*60, // frames
+    shieldTime:6*60
+  };
+
+  // ===== Entities =====
+  class Ship{
+    constructor(){
+      this.pos=new Vec(canvas.width/2, canvas.height/2);
+      this.vel=new Vec(0,0);
+      this.angle=-Math.PI/2;
+      this.radius=params.shipRadius;
+      this.alive=true;
+      this.thrusting=false;
+      this.spawnShield=params.hyperSafeTime;
+      this.shield=0;
+    }
+    update(){
+      if (state.keys['ArrowLeft']||state.keys['left']) this.angle -= 0.07;
+      if (state.keys['ArrowRight']||state.keys['right']) this.angle += 0.07;
+      const wasThrust=this.thrusting;
+      this.thrusting=!!(state.keys['ArrowUp']||state.keys['thrust']);
+      if (this.thrusting){
+        this.vel.add(Vec.fromAngle(this.angle, params.shipThrust));
+        if (!wasThrust) sfx.thrustOn();
+      }
+      this.vel.scale(params.shipFriction);
+      this.pos.x=wrap(this.pos.x+this.vel.x, canvas.width);
+      this.pos.y=wrap(this.pos.y+this.vel.y, canvas.height);
+      if (this.spawnShield>0) this.spawnShield--;
+      if (this.shield>0) this.shield--;
+    }
+    draw(){
+      ctx.save();
+      ctx.translate(this.pos.x,this.pos.y);
+      ctx.rotate(this.angle);
+      ctx.shadowColor = this.shield>0? '#7fffd4' : '#59f';
+      ctx.shadowBlur = 10;
+      ctx.beginPath();
+      ctx.moveTo(this.radius, 0);
+      ctx.lineTo(-this.radius*0.8, this.radius*0.75);
+      ctx.lineTo(-this.radius*0.5, 0);
+      ctx.lineTo(-this.radius*0.8, -this.radius*0.75);
+      ctx.closePath();
+      ctx.strokeStyle='white'; ctx.lineWidth=2; ctx.stroke();
+      if (this.thrusting){
+        ctx.beginPath();
+        ctx.moveTo(-this.radius*0.7,0);
+        ctx.lineTo(-this.radius-rand(6,12), rand(-1,1));
+        ctx.strokeStyle='#59f'; ctx.lineWidth=2; ctx.stroke();
+      }
+      if ((this.spawnShield>0 || this.shield>0) && (Math.floor((this.spawnShield||this.shield)/6)%2===0)){
+        ctx.beginPath(); ctx.arc(0,0,this.radius+6,0,TAU);
+        ctx.strokeStyle = this.shield>0? 'rgba(127,255,212,.8)' : 'rgba(100,180,255,.6)';
+        ctx.lineWidth=1.8; ctx.setLineDash([6,6]); ctx.stroke(); ctx.setLineDash([]);
+      }
+      ctx.restore();
+    }
+    kill(){
+      if (this.shield>0) return;
+      this.alive=false;
+      spawnExplosion(this.pos.x,this.pos.y,26);
+      state.lives--; updateHUD();
+      if (state.lives>=0) setTimeout(()=>resetShip(), 900);
+    }
+  }
+  class Bullet{
+    constructor(x,y,angle){
+      this.pos=new Vec(x,y);
+      const extra = state.rapid>0? 1.4 : 1;
+      this.vel=Vec.fromAngle(angle, params.bulletSpeed*extra).add(ship.vel.copy().scale(0.25));
+      this.life=params.bulletLife;
+      this.radius=2;
+    }
+    update(){this.pos.x=wrap(this.pos.x+this.vel.x, canvas.width); this.pos.y=wrap(this.pos.y+this.vel.y, canvas.height); this.life--;}
+    draw(){ctx.beginPath(); ctx.arc(this.pos.x,this.pos.y,this.radius,0,TAU); ctx.fillStyle='white'; ctx.fill();}
+  }
+  class Asteroid{
+    constructor(x,y,size=3){
+      this.pos=new Vec(x,y);
+      const ang=rand(0,TAU);
+      const spd=rand(params.asteroidMinSpeed, params.asteroidMaxSpeed)*(4-size)/3+rand(-0.2,0.2);
+      this.vel=Vec.fromAngle(ang, spd);
+      this.size=size;
+      this.radius=size===3?44:size===2?28:16;
+      this.rot=rand(-0.02,0.02); this.angle=rand(0,TAU);
+      const verts=10+Math.floor(Math.random()*4);
+      this.shape=[]; for(let i=0;i<verts;i++){const a=(i/verts)*TAU; const r=this.radius*rand(0.78,1.18); this.shape.push([Math.cos(a)*r,Math.sin(a)*r]);}
+    }
+    update(){this.pos.x=wrap(this.pos.x+this.vel.x, canvas.width); this.pos.y=wrap(this.pos.y+this.vel.y, canvas.height); this.angle+=this.rot;}
+    draw(){
+      ctx.save(); ctx.translate(this.pos.x,this.pos.y); ctx.rotate(this.angle);
+      ctx.beginPath(); let first=true; for(const [x,y] of this.shape){ if(first){ctx.moveTo(x,y); first=false;} else ctx.lineTo(x,y);}
+      ctx.closePath(); ctx.lineWidth=2; ctx.strokeStyle='#9ec8ff'; ctx.stroke(); ctx.restore();
+    }
+    split(){
+      if (this.size>1){
+        const kids=[new Asteroid(this.pos.x,this.pos.y,this.size-1), new Asteroid(this.pos.x,this.pos.y,this.size-1)];
+        kids[0].vel.add(new Vec(rand(-0.5,0.5),rand(-0.5,0.5))); kids[1].vel.add(new Vec(rand(-0.5,0.5),rand(-0.5,0.5)));
+        return kids;
+      }
+      return [];
+    }
+  }
+  class Particle{
+    constructor(x,y,vel,life){this.pos=new Vec(x,y);this.vel=vel;this.life=life;this.total=life;}
+    update(){this.pos.add(this.vel); this.life--;}
+    draw(){const t=this.life/this.total; ctx.globalAlpha=clamp(t,0,1); ctx.fillStyle='#9ec8ff'; ctx.fillRect(this.pos.x,this.pos.y,2,2); ctx.globalAlpha=1;}
+  }
+  class PowerUp{
+    constructor(x,y,type){
+      this.pos=new Vec(x,y); this.vel=Vec.fromAngle(rand(0,TAU), rand(0.4,1.1));
+      this.type=type; this.life=params.powerupLife; this.radius=12;
+    }
+    update(){this.pos.x=wrap(this.pos.x+this.vel.x, canvas.width); this.pos.y=wrap(this.pos.y+this.vel.y, canvas.height); this.life--;}
+    draw(){
+      ctx.save(); ctx.translate(this.pos.x,this.pos.y);
+      ctx.beginPath(); ctx.arc(0,0,this.radius,0,TAU);
+      ctx.lineWidth=2;
+      let color = this.type==='shield'?'#7fffd4':this.type==='rapid'?'#ffd166':'#a6e3ff';
+      ctx.strokeStyle=color; ctx.stroke();
+      ctx.font='12px system-ui'; ctx.textAlign='center'; ctx.textBaseline='middle';
+      const label = this.type==='shield'?'S':this.type==='rapid'?'R':'+1';
+      ctx.fillStyle=color; ctx.fillText(label,0,1);
+      ctx.restore();
+    }
+  }
+
+  // ===== Systems =====
+  let ship;
+  function resetShip(){ship=new Ship(); ship.alive=true; state.invuln=90;}
+
+  function spawnWave(level=1){
+    const count=params.asteroidBase+level;
+    for(let i=0;i<count;i++){
+      let x,y; do {x=rand(0,canvas.width); y=rand(0,canvas.height);} while(dist2(x,y, ship.pos.x,ship.pos.y)<200*200);
+      state.asteroids.push(new Asteroid(x,y,3));
+    }
+  }
+
+  function shoot(){
+    if (state.cooldown>0) return;
+    const cap = state.rapid>0? params.maxBullets+4 : params.maxBullets;
+    if (state.bullets.length>=cap) return;
+    const nose=Vec.fromAngle(ship.angle, ship.radius+2).add(ship.pos.copy());
+    state.bullets.push(new Bullet(nose.x,nose.y, ship.angle));
+    state.cooldown = state.rapid>0? 5 : 12;
+    initAudio(); sfx.shoot();
+    if (navigator.vibrate) navigator.vibrate(10);
+  }
+
+  function collideCircle(a,b){const r=a.radius+b.radius; return dist2(a.pos.x,a.pos.y,b.pos.x,b.pos.y)<=r*r;}
+
+  function spawnExplosion(x,y,count=params.particleCount){
+    for(let i=0;i<count;i++) state.particles.push(new Particle(x,y, Vec.fromAngle(rand(0,TAU), rand(0.5,3.5)), 40+Math.floor(Math.random()*20)));
+  }
+
+  function maybeDropPowerup(x,y){
+    if (Math.random()<params.powerupDropChance){
+      const t = ['shield','rapid','life'][Math.floor(Math.random()*3)];
+      state.powerups.push(new PowerUp(x,y,t));
+    }
+  }
+
+  function nextLevel(){state.level++; updateHUD(); spawnWave(state.level);}
+  function gameOver(){
+    state.running=false;
+    overlay(true, `<h2 style="margin:0 0 8px">Game Over</h2>
+      <p style="margin:0 0 12px;opacity:.9">Final score: <b>${state.score}</b></p>
+      <a class="btn" href="#" id="overlayStart">Play Again</a>`);
+  }
+
+  // ===== Loop =====
+  function update(){
+    if (!state.running) return;
+
+    ctx.clearRect(0,0,canvas.width,canvas.height);
+
+    // star twinkle
+    ctx.globalAlpha = 0.5;
+    for (let i=0;i<1;i++){ctx.fillStyle='#ffffff'; ctx.fillRect(Math.random()*canvas.width, Math.random()*canvas.height,1,1);}
+    ctx.globalAlpha = 1;
+
+    ship.update(); ship.draw();
+
+    // Bullets
+    for (let i=state.bullets.length-1;i>=0;i--){const b=state.bullets[i]; b.update(); b.draw(); if (b.life<=0) state.bullets.splice(i,1);}
+
+    // Asteroids
+    for (const a of state.asteroids){a.update(); a.draw();}
+
+    // Particles
+    for (let i=state.particles.length-1;i>=0;i--){const p=state.particles[i]; p.update(); p.draw(); if (p.life<=0) state.particles.splice(i,1);}
+
+    // Powerups
+    for (let i=state.powerups.length-1;i>=0;i--){const pu=state.powerups[i]; pu.update(); pu.draw(); if (pu.life<=0) state.powerups.splice(i,1);}
+
+    // Collisions: bullets vs asteroids
+    for (let ai=state.asteroids.length-1; ai>=0; ai--){
+      const a=state.asteroids[ai];
+      for (let bi=state.bullets.length-1; bi>=0; bi--){
+        const b=state.bullets[bi];
+        if (collideCircle(a,b)){
+          state.bullets.splice(bi,1);
+          state.asteroids.splice(ai,1);
+          spawnExplosion(a.pos.x,a.pos.y, 12+(4*a.size));
+          sfx.explode();
+          state.score += (a.size===3? 20 : a.size===2? 50 : 100);
+          updateHUD();
+          const kids=a.split(); for (const k of kids) state.asteroids.push(k);
+          maybeDropPowerup(a.pos.x,a.pos.y);
+          break;
+        }
+      }
+    }
+
+    // Ship vs asteroids
+    if (ship.alive && ship.spawnShield<=0){
+      for (const a of state.asteroids){
+        if (collideCircle(ship,a)){ ship.kill(); if (state.lives<0){ gameOver(); return; } break; }
+      }
+    }
+
+    // Ship vs powerups
+    for (let i=state.powerups.length-1;i>=0;i--){
+      const pu=state.powerups[i];
+      if (collideCircle(ship, pu)){
+        applyPowerup(pu.type);
+        state.powerups.splice(i,1);
+        sfx.pickup();
+      }
+    }
+
+    // Timers
+    if (state.cooldown>0) state.cooldown--;
+    if (state.rapid>0){ state.rapid--; setBuffText(`Rapid ${Math.ceil(state.rapid/60)}s`); if (state.rapid===0) setBuffText();}
+    if (ship.shield>0){ setBuffText(`Shield ${Math.ceil(ship.shield/60)}s`); } else if (state.rapid===0) setBuffText();
+
+    // Wave cleared?
+    if (state.asteroids.length===0) nextLevel();
+
+    requestAnimationFrame(update);
+  }
+
+  function applyPowerup(t){
+    if (t==='life'){ state.lives++; updateHUD(); flashBuff('Life +1'); return; }
+    if (t==='rapid'){ state.rapid = params.rapidFire; flashBuff('Rapid'); return; }
+    if (t==='shield'){ ship.shield = params.shieldTime; flashBuff('Shield'); return; }
+  }
+
+  // ===== Input =====
+  window.addEventListener('keydown',(e)=>{
+    if (['ArrowLeft','ArrowRight','ArrowUp',' '].includes(e.key)) e.preventDefault();
+    state.keys[e.key]=true;
+    if (e.key===' '){ shoot(); }
+    if (e.key==='Enter'){ if (!state.running) startGame(); }
+    if ((e.key==='m'||e.key==='M')){ initAudio(); }
+  });
+  window.addEventListener('keyup',(e)=>{ state.keys[e.key]=false; });
+
+  // Touch controls (press & hold)
+  function bindHold(btn, key){
+    const el=document.getElementById(btn);
+    const on=(ev)=>{ev.preventDefault(); state.keys[key]=true; initAudio();};
+    const off=(ev)=>{ev.preventDefault(); state.keys[key]=false;};
+    el.addEventListener('pointerdown', on);
+    el.addEventListener('pointerup', off);
+    el.addEventListener('pointerleave', off);
+    el.addEventListener('pointercancel', off);
+  }
+  bindHold('left','left'); bindHold('right','right'); bindHold('thrust','thrust');
+  document.getElementById('fire').addEventListener('pointerdown',(e)=>{e.preventDefault(); initAudio(); shoot(); if (navigator.vibrate) navigator.vibrate(10);});
+
+  // ===== HUD / UI =====
+  const scoreEl=document.getElementById('score');
+  const livesEl=document.getElementById('lives');
+  const levelEl=document.getElementById('level');
+  const buffEl=document.getElementById('buffTxt');
+
+  function updateHUD(){scoreEl.textContent=state.score; livesEl.textContent=Math.max(0,state.lives); levelEl.textContent=state.level;}
+  function setBuffText(txt){ if (!txt){buffEl.hidden=true; buffEl.textContent='';} else {buffEl.hidden=false; buffEl.textContent=txt;}}
+  function flashBuff(txt){ setBuffText(txt); setTimeout(()=>{ if (txt.startsWith('Life')) setBuffText(''); }, 1200); }
+
+  function overlay(show, html){
+    const ov=document.getElementById('overlay'); ov.hidden=!show;
+    if (show){ const card=document.getElementById('overlayCard'); card.innerHTML=html; const btn=card.querySelector('#overlayStart'); if (btn) btn.addEventListener('click',(e)=>{e.preventDefault(); startGame();},{once:true});}
+  }
+
+  function resetState(){
+    state.running=false; state.score=0; state.lives=3; state.level=1;
+    state.bullets.length=0; state.asteroids.length=0; state.particles.length=0; state.powerups.length=0;
+    state.cooldown=0; state.rapid=0; updateHUD(); setBuffText('');
+  }
+
+  function startGame(){
+    overlay(false,''); resetState(); resetShip(); spawnWave(state.level); state.running=true; initAudio(); update();
+  }
+
+  document.getElementById('startBtn').addEventListener('click',(e)=>{e.preventDefault(); startGame();});
+  overlay(true, document.querySelector('#overlay .centerCard').innerHTML);
+})();
+</script>
+</body>
+</html>
