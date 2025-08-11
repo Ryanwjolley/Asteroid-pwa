@@ -104,7 +104,7 @@
   // Inline service worker via Blob (cache this file for offline)
   if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost')) {
     const swCode = `
-      const CACHE = 'asteroids-v1';
+      const CACHE = 'asteroids-v3';
       self.addEventListener('install', e=>{
         e.waitUntil((async ()=>{
           const c = await caches.open(CACHE);
@@ -123,6 +123,21 @@
       self.addEventListener('fetch', e=>{
         const req = e.request;
         if (req.method !== 'GET') return;
+        const isHTML = req.mode === 'navigate' || (req.headers.get('accept') || '').includes('text/html');
+        if (isHTML) {
+          e.respondWith((async ()=>{
+            try {
+              const net = await fetch(req, {cache:'no-store'});
+              const c = await caches.open(CACHE);
+              c.put(req, net.clone());
+              return net;
+            } catch {
+              const cached = await caches.match(req);
+              return cached || Response.error();
+            }
+          })());
+          return;
+        }
         e.respondWith((async ()=>{
           const cached = await caches.match(req);
           if (cached) return cached;
@@ -382,6 +397,7 @@
     overlay(true, `<h2 style="margin:0 0 8px">Game Over</h2>
       <p style="margin:0 0 12px;opacity:.9">Final score: <b>${state.score}</b></p>
       <a class="btn" href="#" id="overlayStart">Play Again</a>`);
+    if (footerEl) footerEl.hidden=false;
   }
 
   // ===== Loop =====
@@ -490,6 +506,7 @@
   const livesEl=document.getElementById('lives');
   const levelEl=document.getElementById('level');
   const buffEl=document.getElementById('buffTxt');
+  const footerEl=document.querySelector('.footer');
 
   function updateHUD(){scoreEl.textContent=state.score; livesEl.textContent=Math.max(0,state.lives); levelEl.textContent=state.level;}
   function setBuffText(txt){ if (!txt){buffEl.hidden=true; buffEl.textContent='';} else {buffEl.hidden=false; buffEl.textContent=txt;}}
@@ -507,7 +524,7 @@
   }
 
   function startGame(){
-    overlay(false,''); resetState(); resetShip(); spawnWave(state.level); state.running=true; initAudio(); update();
+    overlay(false,''); resetState(); resetShip(); spawnWave(state.level); state.running=true; if (footerEl) footerEl.hidden=true; initAudio(); update();
   }
 
   document.getElementById('startBtn').addEventListener('click',(e)=>{e.preventDefault(); startGame();});
