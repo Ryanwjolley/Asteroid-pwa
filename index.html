@@ -496,8 +496,21 @@
   function flashBuff(txt){ setBuffText(txt); setTimeout(()=>{ if (txt.startsWith('Life')) setBuffText(''); }, 1200); }
 
   function overlay(show, html){
-    const ov=document.getElementById('overlay'); ov.hidden=!show;
-    if (show){ const card=document.getElementById('overlayCard'); card.innerHTML=html; const btn=card.querySelector('#overlayStart'); if (btn) btn.addEventListener('click',(e)=>{e.preventDefault(); startGame();},{once:true});}
+    const ov=document.getElementById('overlay');
+    const footer=document.querySelector('.footer');
+    if (show){
+      ov.hidden=false;
+      ov.style.display='grid';
+      const card=document.getElementById('overlayCard');
+      card.innerHTML=html;
+      const btn=card.querySelector('#overlayStart');
+      if (btn) btn.addEventListener('click',(e)=>{e.preventDefault(); startGame();},{once:true});
+      if (footer) footer.hidden=false;
+    } else {
+      ov.hidden=true;
+      ov.style.display='none';
+      if (footer) footer.hidden=true;
+    }
   }
 
   function resetState(){
@@ -507,10 +520,17 @@
   }
 
   function startGame(){
-    overlay(false,''); resetState(); resetShip(); spawnWave(state.level); state.running=true; initAudio(); update();
+    overlay(false,'');
+    resetState();
+    resetShip();
+    spawnWave(state.level);
+    state.running=true;
+    initAudio();
+    update();
   }
 
-  document.getElementById('startBtn').addEventListener('click',(e)=>{e.preventDefault(); startGame();});
+  const startBtn = document.getElementById('startBtn');
+  startBtn.addEventListener('click',(e)=>{e.preventDefault(); startGame();});
   overlay(true, document.querySelector('#overlay .centerCard').innerHTML);
 })();
 </script>
